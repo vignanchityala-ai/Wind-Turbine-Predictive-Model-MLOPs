@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data — keep folder structure, not contents (large, and CARE dataset is CC BY-SA 4.0;
+# don't redistribute it via this repo)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Model artifacts — often large / regenerable from the pipeline
+models/*
+!models/.gitkeep
+
+# Generated reports
+outputs/*
+!outputs/.gitkeep
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

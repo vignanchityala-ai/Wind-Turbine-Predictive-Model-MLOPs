@@ -1,0 +1,35 @@
+name: CI
+
+# Runs the full pipeline end-to-end against schema-accurate synthetic data
+# on every push/PR. This is a smoke test, not a substitute for unit tests —
+# it catches "the pipeline is broken" (import errors, schema mismatches,
+# crashes) before you find out on real data. Same command sequence already
+# validated manually; see tests/make_synthetic_data.py.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate synthetic schema-accurate sample data
+        run: python tests/make_synthetic_data.py
+
+      - name: Run pipeline end-to-end (isolation_forest, fast model)
+        run: python -m src.run_pipeline --model isolation_forest
+
+      - name: Verify evaluation report was produced
+        run: test -f outputs/evaluation_report.csv
