@@ -1,0 +1,11 @@
+data/
+notebooks/
+tests/
+.git/
+.github/
+outputs/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.gitignore
+README.md

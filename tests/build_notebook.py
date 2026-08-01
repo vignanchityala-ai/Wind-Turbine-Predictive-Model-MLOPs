@@ -23,6 +23,7 @@ This notebook walks through:
 6. Scoring the prediction period and visualizing the anomaly score vs the
    documented fault onset
 7. Evaluating with CARE-style Coverage / Accuracy / Reliability / Earliness
+8. Persisting a trained model and calling it through the serving API
 
 **Before running:** download the dataset from
 [Kaggle](https://www.kaggle.com/datasets/azizkasimov/wind-turbine-scada-data-for-early-fault-detection),
@@ -103,7 +104,7 @@ plt.show()
 
 md("## 3. Feature engineering")
 
-code("""df_feat, feature_cols = features.engineer_features(sub.df)
+code("""df_feat, feature_cols, power_curve_reference = features.engineer_features(sub.df)
 print(f"{len(feature_cols)} model-ready numeric features engineered (rolling stats + power-curve residual).")
 df_feat[feature_cols].describe().T.head(10)
 """)
@@ -214,8 +215,97 @@ for k, v in summary.items():
     print(f"{k:28s} {v}")
 """)
 
+md("""## 8. Persisting a trained model and calling it through the serving API
+
+`src/run_pipeline.py --save-models` fits and saves one bundle per turbine
+(detector + threshold + feature column order + power-curve reference) to
+`models/`. `src/serve.py` (a FastAPI app) loads those bundles and exposes a
+`/predict` endpoint. Below: save this notebook's already-fitted model, then
+call it exactly the way an external caller would — over HTTP.
+
+**Run this in a terminal first** (can't background a long-running server
+from inside a notebook cell cleanly):
+```bash
+python -m src.run_pipeline --model isolation_forest --save-models
+uvicorn src.serve:app --reload --port 8000
+```
+Then run the cell below.""")
+
+code("""import joblib
+
+# Save this notebook's exact fitted model + threshold + power curve
+# reference as a bundle — the same format run_pipeline.py --save-models
+# produces, and the same format src/serve.py expects to load.
+bundle = {
+    "detector": clf,
+    "feature_cols": feature_cols,
+    "threshold": threshold,
+    "power_curve_reference": power_curve_reference,
+    "asset_id": sub.asset_id,
+    "dataset_name": sub.name,
+    "model_kind": "isolation_forest",
+    "min_event_length": config.MIN_EVENT_LENGTH,
+}
+config.MODEL_DIR.mkdir(parents=True, exist_ok=True)
+joblib.dump(bundle, config.MODEL_DIR / f"{sub.name}.joblib")
+print(f"Saved {sub.name}.joblib to {config.MODEL_DIR}")
+""")
+
+code("""import json
+import urllib.request
+
+# Build a request payload the way a real caller would: a window of recent
+# raw readings (>= 6h / 36 points so rolling features are meaningful).
+window = sub.prediction.tail(40).copy()
+window[config.TIME_COL] = window[config.TIME_COL].astype(str)
+drop_cols = [c for c in (config.ID_COL, config.ASSET_COL, config.SPLIT_COL, config.STATUS_COL)
+             if c in window.columns]
+readings = window.drop(columns=drop_cols).to_dict('records')
+
+req = urllib.request.Request(
+    f"http://localhost:8000/predict/{sub.name}",
+    data=json.dumps({"readings": readings}).encode(),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        print(json.loads(resp.read()))
+except Exception as e:
+    print(f"Couldn't reach the API — is `uvicorn src.serve:app --port 8000` running? ({e})")
+""")
+
+md("""Note the response's `flagged` field is a **single-point** comparison
+against the threshold — it doesn't apply the same sustained-run smoothing
+(`MIN_EVENT_LENGTH` consecutive points) that the offline evaluation above
+does. The response includes `min_event_length` so a consuming system can
+apply that same rule itself before paging anyone. See the docstring at the
+top of `src/serve.py` for the full reasoning.""")
+
+
+
 md("""## Notes for productionizing
 
+**Already built and tested** (this session): model persistence (joblib
+bundles with a fit-once power-curve reference, avoiding train/serve skew),
+a FastAPI serving layer with API-key auth, a Dockerfile, and a CI smoke
+test that trains, saves, serves, and calls the API on every push.
+
+**Still worth doing, roughly in order:**
+- **Hosting**: for an internal API, check whether your company already has
+  an AWS/Azure/GCP account this should land in — that answer picks the
+  specific service (e.g. ECS/Cloud Run/Container Apps) and, more
+  importantly, whatever auth/networking standard your org already uses. If
+  there's no existing cloud footprint yet, a single small VM running the
+  Docker container behind a reverse proxy is a reasonable minimal-ops start
+  for a handful of internal callers.
+- **Auth upgrade**: the API's single shared `X-API-Key` is fine for a first
+  internal version; move to per-caller keys or your company's SSO/OAuth
+  gateway once more than one team depends on it.
+- **Sustained-alert smoothing**: the API scores one point at a time (see
+  the note in section 8) — whatever calls it should apply the same
+  `min_event_length` consecutive-flags rule the offline evaluation uses,
+  or you'll get noisier alerts than the Reliability metric suggests.
 - **Per-turbine models**: this notebook and pipeline fit one model per
   turbine/sub-dataset, matching how the CARE dataset (and most real SCADA
   deployments) are structured. If your fleet has many turbines of the same
@@ -223,14 +313,16 @@ md("""## Notes for productionizing
   fewer models to maintain, but you lose some turbine-specific nuance.
 - **Retraining cadence**: seasonal effects matter (this data spans full
   years for a reason). Retrain training-window models at least seasonally,
-  or use a rolling window.
-- **Alert routing**: the `min_event_length` in `config.py` controls how many
-  consecutive flagged points are required before an alert fires — tune this
-  against your team's tolerance for false alarms vs. detection lag.
+  or use a rolling window — and re-run `--save-models` each time.
+- **Model storage**: the Dockerfile currently bakes `models/` into the
+  image (simplest to start with, fully reproducible). Once you have more
+  than a couple of turbines, externalize model loading — mount a volume or
+  pull from object storage at container startup — so retraining doesn't
+  require a full image rebuild.
 - **Next model upgrades**: LSTM/Transformer autoencoders, or a proper
   survival/RUL (remaining-useful-life) model, tend to outperform the dense
   autoencoder baseline here on this exact dataset in published work —
-  worth trying once the pipeline skeleton above is proven out.
+  worth trying once the current system is proven out end to end.
 """)
 
 nb['cells'] = cells

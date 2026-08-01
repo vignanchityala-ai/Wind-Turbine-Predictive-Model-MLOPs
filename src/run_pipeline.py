@@ -38,10 +38,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(
 log = logging.getLogger("pipeline")
 
 
-def process_one(sub: data_loader.SubDataset, model_kind: str) -> tuple[evaluation.SubDatasetResult, dict]:
+def process_one(sub: data_loader.SubDataset, model_kind: str,
+                 save_model: bool = False,
+                 model_dir: Path = config.MODEL_DIR) -> tuple[evaluation.SubDatasetResult, dict]:
     """Run the full fit/score/evaluate cycle for a single sub-dataset."""
     t0 = time.time()
-    df, feature_cols = features.engineer_features(sub.df)
+    df, feature_cols, power_curve_reference = features.engineer_features(sub.df)
     label = features.build_label(df)  # 1 = abnormal status
     df = df.assign(_status_label=label)
 
@@ -85,6 +87,29 @@ def process_one(sub: data_loader.SubDataset, model_kind: str) -> tuple[evaluatio
         fault_onset=sub.event_end,
     )
 
+    if save_model:
+        if model_kind != "isolation_forest":
+            log.warning(
+                "  Skipping model save for %s: persistence is currently only "
+                "wired up for --model isolation_forest (sklearn objects are "
+                "joblib-safe; the Keras autoencoder needs its own model.save() "
+                "path, not yet implemented here).", sub.name,
+            )
+        else:
+            import joblib
+            model_dir.mkdir(parents=True, exist_ok=True)
+            bundle = {
+                "detector": clf,
+                "feature_cols": feature_cols,
+                "threshold": threshold,
+                "power_curve_reference": power_curve_reference,
+                "asset_id": sub.asset_id,
+                "dataset_name": sub.name,
+                "model_kind": model_kind,
+                "min_event_length": config.MIN_EVENT_LENGTH,
+            }
+            joblib.dump(bundle, model_dir / f"{sub.name}.joblib")
+
     diagnostics = {
         "n_features": len(feature_cols),
         "n_train_rows": len(train_fit),
@@ -108,6 +133,11 @@ def main():
                         help="Only process the first N sub-datasets (debugging)")
     parser.add_argument("--output", type=str,
                         default=str(config.OUTPUT_DIR / "evaluation_report.csv"))
+    parser.add_argument("--save-models", action="store_true", default=False,
+                        help="Persist each turbine's fitted model bundle (joblib) "
+                             "to --model-dir, for use by src/serve.py. Currently "
+                             "only supported for --model isolation_forest.")
+    parser.add_argument("--model-dir", type=str, default=str(config.MODEL_DIR))
     args = parser.parse_args()
 
     raw_dir = Path(args.raw_dir)
@@ -122,7 +152,8 @@ def main():
         log.info("[%d/%d] Processing %s", i, len(paths), p.name)
         try:
             sub = data_loader.load_subdataset(p)
-            res, diag = process_one(sub, args.model)
+            res, diag = process_one(sub, args.model, save_model=args.save_models,
+                                     model_dir=Path(args.model_dir))
             results.append(res)
             diag["dataset"] = sub.name
             diag_rows.append(diag)
@@ -153,6 +184,8 @@ def main():
     for k, v in summary.items():
         log.info("  %-28s %s", k, _fmt(v))
     log.info("Per-dataset report written to: %s", out_path)
+    if args.save_models:
+        log.info("Model bundles saved to: %s", args.model_dir)
     log.info("=" * 60)
 
 

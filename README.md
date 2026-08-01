@@ -63,17 +63,81 @@ Outputs land in `outputs/`:
 - `evaluation_report.csv` — per-sub-dataset Coverage/Accuracy/Reliability/Earliness
 - `evaluation_report_diagnostics.csv` — feature counts, row counts, thresholds, runtime
 
+## 4. Serve it as an API
+
+Add `--save-models` to persist a joblib bundle per turbine (detector +
+threshold + feature order + power-curve reference), then run the FastAPI
+service that loads them:
+
+```bash
+python -m src.run_pipeline --model isolation_forest --save-models
+uvicorn src.serve:app --port 8000
+# add --reload while developing
+```
+
+Interactive API docs (Swagger UI, generated for free by FastAPI) at
+`http://localhost:8000/docs`.
+
+```bash
+curl -X POST http://localhost:8000/predict/WT100_anomaly \
+  -H "Content-Type: application/json" \
+  -d '{"readings": [{"time_stamp": "2021-02-08T23:40:00", "power": 812.3, "wind_speed": 9.1, ...}, ...]}'
+```
+
+Send at least 36 readings (6h at 10-min resolution, ascending time order) —
+the model's rolling-window features need that lookback to be meaningful.
+See the docstring at the top of `src/serve.py` for the full API contract,
+including two things worth reading before you wire anything real up to
+this: the API is deliberately **stateless** (callers supply the window,
+not the server), and it does single-point scoring, not the sustained-event
+smoothing the offline evaluation uses — both are explained there with the
+reasoning, not just asserted.
+
+**Auth**: set the `API_KEY` env var in any environment other than your own
+laptop — `uvicorn` with no `API_KEY` set runs with auth disabled.
+
+**Test it**: `pip install -r requirements.txt`, then
+`python tests/smoke_test_api.py` against a running server — same check CI
+runs on every push.
+
+**Docker**:
+```bash
+docker build -t wind-turbine-api .
+docker run -p 8000:8000 -e API_KEY=your-secret-here wind-turbine-api
+```
+*(Written carefully but not build-tested — no Docker daemon in the sandbox
+this was built in. Validate locally before deploying.)*
+
+**Where to actually run it**, since this is for internal/work use: check
+first whether your team already has an AWS/Azure/GCP account this should
+live in — that answer determines both the specific hosting service
+(ECS Fargate / Cloud Run / Container Apps all fit a single small container
+well) and, more importantly, whatever auth and network-access pattern your
+company already standardizes on. If there's no existing cloud footprint
+yet, a single small VM running this container behind a reverse proxy
+(Caddy or nginx for TLS) is a reasonable minimal-ops starting point for a
+handful of internal callers — no Kubernetes needed for this scale. Either
+way, loop in whoever handles infra/security before this is reachable
+outside your own machine, especially once it's scoring real turbine data
+rather than the public Kaggle set.
+
 ## How it works
 
 ```
-src/config.py        Schema constants, status-ID map, tunable thresholds
-src/data_loader.py    Robust CSV loading + event metadata parsing
-src/features.py       Zero-run cleaning, power-curve residual, rolling stats
-src/model.py           IsolationForestDetector (baseline) + AutoencoderDetector
-src/evaluation.py     CARE-style Coverage/Accuracy/Reliability/Earliness scoring
-src/run_pipeline.py    Orchestrates load -> features -> fit -> score -> evaluate
+src/config.py          Schema constants, status-ID map, tunable thresholds
+src/data_loader.py      Robust CSV loading + event metadata parsing
+src/features.py         Zero-run cleaning, power-curve residual (fit/apply split
+                         to avoid train/serve skew), rolling stats
+src/model.py             IsolationForestDetector (baseline) + AutoencoderDetector
+src/evaluation.py       CARE-style Coverage/Accuracy/Reliability/Earliness scoring
+src/run_pipeline.py      Orchestrates load -> features -> fit -> score -> evaluate
+                         -> (optionally) persist model bundles
+src/serve.py             FastAPI app: loads persisted bundles, exposes /predict
+Dockerfile              Packages src/serve.py + models/ into a container
 tests/make_synthetic_data.py   Generates schema-accurate fake data for smoke-testing
+tests/smoke_test_api.py        End-to-end check: train -> save -> serve -> predict
 tests/build_notebook.py        Rebuilds the notebook from source (edit this, not the .ipynb, to change it)
+.github/workflows/ci.yml       Runs the above smoke tests on every push
 ```
 
 **Per-turbine models, not one global model.** Each sub-dataset gets its own

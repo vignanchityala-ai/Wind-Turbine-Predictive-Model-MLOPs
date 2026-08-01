@@ -67,31 +67,54 @@ def clean_zeros_as_missing(df: pd.DataFrame, cols: list[str],
     return df
 
 
-def add_power_curve_features(df: pd.DataFrame, power_col: str,
-                              wind_col: str) -> pd.DataFrame:
+def fit_power_curve_reference(df: pd.DataFrame, power_col: str,
+                               wind_col: str, bin_width: float = 0.5) -> dict:
     """
-    Adds a simple empirical power-curve residual: for each wind-speed bin,
-    compute the median power observed in TRAINING/normal data, then express
-    each point's deviation from that expected power. Large negative
-    residuals (producing much less power than expected for the wind speed)
-    are a classic early indicator of degradation (blade fouling, pitch
+    Fit an empirical power-curve lookup (median power per wind-speed bin)
+    from NORMAL, TRAINING-period rows only.
+
+    IMPORTANT: fit this ONCE per turbine, at training time, and persist the
+    returned reference alongside the trained model. At inference time, call
+    apply_power_curve_reference() with this SAME reference — never refit
+    from whatever short window of live data happens to arrive at serving
+    time. Refitting at serve time is a classic train/serve skew bug: the
+    "expected power" baseline would silently drift depending on what's in
+    the request instead of staying anchored to the turbine's known-healthy
+    baseline.
+    """
+    bins = np.arange(0, df[wind_col].max() + bin_width, bin_width)
+    tmp = df.copy()
+    tmp["_wind_bin"] = pd.cut(tmp[wind_col], bins=bins)
+
+    normal_mask = tmp[config.STATUS_COL].isin(config.NORMAL_STATUS_IDS) \
+        if config.STATUS_COL in tmp.columns else pd.Series(True, index=tmp.index)
+    train_mask = (tmp[config.SPLIT_COL] == config.TRAIN_VALUE) \
+        if config.SPLIT_COL in tmp.columns else pd.Series(True, index=tmp.index)
+    ref_rows = tmp[normal_mask & train_mask]
+
+    expected = ref_rows.groupby("_wind_bin", observed=True)[power_col].median()
+    return {"bins": bins, "expected": expected, "power_col": power_col, "wind_col": wind_col}
+
+
+def apply_power_curve_reference(df: pd.DataFrame, reference: dict) -> pd.DataFrame:
+    """
+    Apply a previously-fit power-curve reference (from fit_power_curve_reference)
+    to any dataframe — training, evaluation, or a live inference window. Large
+    negative residuals (producing much less power than expected for the wind
+    speed) are a classic early indicator of degradation (blade fouling, pitch
     faults, gearbox issues, etc.).
     """
     df = df.copy()
-    bins = np.arange(0, df[wind_col].max() + 1, 0.5)
-    df["_wind_bin"] = pd.cut(df[wind_col], bins=bins)
-
-    normal_mask = df[config.STATUS_COL].isin(config.NORMAL_STATUS_IDS)
-    train_mask = df[config.SPLIT_COL] == config.TRAIN_VALUE
-    ref = df[normal_mask & train_mask]
-
-    expected = ref.groupby("_wind_bin", observed=True)[power_col].median()
-    df["expected_power"] = df["_wind_bin"].map(expected)
+    power_col, wind_col = reference["power_col"], reference["wind_col"]
+    df["_wind_bin"] = pd.cut(df[wind_col], bins=reference["bins"])
+    # .map() on a categorical Series can silently return a categorical-dtype
+    # result instead of float (depends on how completely the reference
+    # covers the bin categories) — force numeric so the subtraction below
+    # doesn't break with "Object with dtype category cannot perform ... subtract".
+    df["expected_power"] = df["_wind_bin"].map(reference["expected"]).astype("float64")
     df["power_residual"] = df[power_col] - df["expected_power"]
     df["power_residual_pct"] = df["power_residual"] / df["expected_power"].replace(0, np.nan)
-
-    df = df.drop(columns=["_wind_bin"])
-    return df
+    return df.drop(columns=["_wind_bin"])
 
 
 def add_rolling_features(df: pd.DataFrame, cols: list[str],
@@ -107,16 +130,13 @@ def add_rolling_features(df: pd.DataFrame, cols: list[str],
     return df
 
 
-def engineer_features(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    """
-    Full feature-engineering pass for one sub-dataset.
-    Returns (augmented_df, list_of_model_feature_columns).
-    """
+def _engineer_common(df: pd.DataFrame, power_curve_reference: dict | None) -> tuple[pd.DataFrame, list[str]]:
+    """Shared feature-assembly steps used by both training and serving paths."""
     cols = identify_columns(df)
     df = clean_zeros_as_missing(df, cols["numeric"])
 
-    if cols["power"] and cols["wind_speed"]:
-        df = add_power_curve_features(df, cols["power"][0], cols["wind_speed"][0])
+    if power_curve_reference is not None:
+        df = apply_power_curve_reference(df, power_curve_reference)
 
     # Keep rolling features to a manageable subset for Wind Farm A (86 cols
     # is small enough to roll all numeric sensors; for B/C you'd want to
@@ -126,10 +146,43 @@ def engineer_features(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     engineered_cols = [c for c in df.columns
                        if c not in config.NON_FEATURE_COLS
                        and c not in ("expected_power",)]
-    # only numeric
     engineered_cols = [c for c in engineered_cols if pd.api.types.is_numeric_dtype(df[c])]
 
     return df, engineered_cols
+
+
+def engineer_features(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str], dict | None]:
+    """
+    Full feature-engineering pass for one sub-dataset AT TRAINING TIME: fits
+    a fresh power-curve reference from this data's normal/training rows.
+
+    Returns (augmented_df, list_of_model_feature_columns, power_curve_reference).
+    Persist power_curve_reference alongside the trained model — the serving
+    path (engineer_features_for_serving) needs the exact same reference to
+    avoid train/serve skew, not a freshly-fit one.
+    """
+    cols = identify_columns(df)
+    reference = None
+    if cols["power"] and cols["wind_speed"]:
+        reference = fit_power_curve_reference(df, cols["power"][0], cols["wind_speed"][0])
+
+    df, engineered_cols = _engineer_common(df, reference)
+    return df, engineered_cols, reference
+
+
+def engineer_features_for_serving(df: pd.DataFrame,
+                                   power_curve_reference: dict | None) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Feature-engineering pass for LIVE INFERENCE: applies a previously-fit
+    power_curve_reference (loaded from the persisted model bundle) instead
+    of fitting a new one. Does not require status_type_id / train_test
+    columns to be present, since live readings won't have them.
+
+    df should be a window of recent readings sorted ascending by time_stamp,
+    with at least max(config.ROLLING_WINDOWS) rows so rolling features on
+    the most recent row reflect a full lookback.
+    """
+    return _engineer_common(df, power_curve_reference)
 
 
 def build_label(df: pd.DataFrame) -> pd.Series:

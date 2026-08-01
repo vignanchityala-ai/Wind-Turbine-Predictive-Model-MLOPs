@@ -1,10 +1,10 @@
 name: CI
 
 # Runs the full pipeline end-to-end against schema-accurate synthetic data
-# on every push/PR. This is a smoke test, not a substitute for unit tests —
-# it catches "the pipeline is broken" (import errors, schema mismatches,
-# crashes) before you find out on real data. Same command sequence already
-# validated manually; see tests/make_synthetic_data.py.
+# on every push/PR — pipeline, model persistence, AND the serving API. This
+# is a smoke test, not a substitute for unit tests, but it would have
+# caught real bugs (e.g. a pandas dtype issue in feature engineering that
+# only surfaced on some datasets) before they reached anyone downstream.
 
 on:
   push:
@@ -28,8 +28,16 @@ jobs:
       - name: Generate synthetic schema-accurate sample data
         run: python tests/make_synthetic_data.py
 
-      - name: Run pipeline end-to-end (isolation_forest, fast model)
-        run: python -m src.run_pipeline --model isolation_forest
+      - name: Run pipeline end-to-end and save model bundles
+        run: python -m src.run_pipeline --model isolation_forest --save-models
 
-      - name: Verify evaluation report was produced
-        run: test -f outputs/evaluation_report.csv
+      - name: Verify evaluation report and model bundles were produced
+        run: |
+          test -f outputs/evaluation_report.csv
+          test -n "$(ls models/*.joblib 2>/dev/null)"
+
+      - name: Start serving API and run API smoke test
+        run: |
+          uvicorn src.serve:app --host 0.0.0.0 --port 8000 &
+          sleep 3
+          python tests/smoke_test_api.py
