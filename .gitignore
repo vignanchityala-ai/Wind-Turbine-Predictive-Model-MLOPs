@@ -11,12 +11,12 @@ env/
 # Jupyter
 .ipynb_checkpoints/
 
-# Data — keep folder structure, not contents (large, and CARE dataset is CC BY-SA 4.0;
-# don't redistribute it via this repo)
+# Data — keep folder structure, not contents (large datasets belong in DVC or remote lake)
+data/*
+!data/.gitkeep
+!data/raw/
 data/raw/*
 !data/raw/.gitkeep
-data/processed/*
-!data/processed/.gitkeep
 
 # Model artifacts — often large / regenerable from the pipeline
 models/*

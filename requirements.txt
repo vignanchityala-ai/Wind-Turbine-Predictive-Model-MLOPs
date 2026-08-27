@@ -10,7 +10,7 @@ uvicorn[standard]>=0.29
 pydantic>=2.0
 
 # Notebook
-jupyter
+# jupyter
 nbconvert
 ipykernel
 matplotlib

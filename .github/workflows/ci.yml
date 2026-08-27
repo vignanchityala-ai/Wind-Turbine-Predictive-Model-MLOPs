@@ -28,8 +28,10 @@ jobs:
       - name: Generate synthetic schema-accurate sample data
         run: python tests/make_synthetic_data.py
 
-      - name: Run pipeline end-to-end and save model bundles
-        run: python -m src.run_pipeline --model isolation_forest --save-models
+      - name: Run pipeline end-to-end, with feature descriptions, and save model bundles
+        run: |
+          python -m src.run_pipeline --model isolation_forest --save-models \
+            --feature-description-path "data/raw/Wind Farm A/wind_farm_a_feature_description.csv"
 
       - name: Verify evaluation report and model bundles were produced
         run: |
@@ -39,5 +41,25 @@ jobs:
       - name: Start serving API and run API smoke test
         run: |
           uvicorn src.serve:app --host 0.0.0.0 --port 8000 &
-          sleep 3
+          SERVER_PID=$!
+
+          # Poll /health instead of a fixed sleep -- a fixed delay is
+          # fragile on slow runners (too short = flaky failures) and wastes
+          # time on fast ones (too long = slower CI for no benefit).
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              echo "Server ready after ${i}s"
+              break
+            fi
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+              echo "Server process died during startup"
+              exit 1
+            fi
+            sleep 1
+          done
+
           python tests/smoke_test_api.py
+          TEST_EXIT=$?
+
+          kill $SERVER_PID 2>/dev/null || true
+          exit $TEST_EXIT

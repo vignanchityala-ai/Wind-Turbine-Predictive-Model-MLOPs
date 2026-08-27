@@ -46,14 +46,26 @@ def _post(path: str, payload: dict):
 
 def main():
     raw_dir = config.PROJECT_ROOT / "data" / "raw" / "Wind Farm A"
-    csvs = [p for p in raw_dir.rglob("*.csv") if "event_info" not in p.stem.lower()]
-    anomaly_paths = [p for p in csvs if "anomaly" in p.stem.lower()]
-    if not anomaly_paths:
-        print("No synthetic anomaly dataset found under", raw_dir,
+    paths = data_loader.discover_subdatasets(raw_dir)
+    if not paths:
+        print("No synthetic dataset found under", raw_dir,
               "— run tests/make_synthetic_data.py first.")
         sys.exit(1)
 
-    sub = data_loader.load_subdataset(anomaly_paths[0])
+    # Find an anomaly dataset via is_anomaly (real event_label lookup), not
+    # filename pattern matching -- filenames are bare integers (e.g.
+    # "2.csv") under the real Wind Farm A structure, with no "anomaly" in
+    # the name at all; the label lives in the shared event_info file.
+    sub = None
+    for p in paths:
+        candidate = data_loader.load_subdataset(p)
+        if candidate.is_anomaly:
+            sub = candidate
+            break
+    if sub is None:
+        print("No anomaly-labeled dataset found among", [p.name for p in paths],
+              "— check event_info was generated/discovered correctly.")
+        sys.exit(1)
     window = sub.prediction.tail(40).copy()
     window[config.TIME_COL] = window[config.TIME_COL].astype(str)
     drop_cols = [c for c in (config.ID_COL, config.ASSET_COL, config.SPLIT_COL, config.STATUS_COL)

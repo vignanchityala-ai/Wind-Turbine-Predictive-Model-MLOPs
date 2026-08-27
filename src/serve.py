@@ -59,6 +59,7 @@ tracking that history server-side.
 
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Optional
 
@@ -77,12 +78,17 @@ app = FastAPI(
 )
 
 API_KEY = os.environ.get("API_KEY")  # unset = auth disabled (local dev only)
+MAX_READINGS = 1000  # ~1 week at 10-min resolution; see _check_readings_size
 
 _MODEL_CACHE: dict[str, dict] = {}
 
 
 def _check_auth(x_api_key: Optional[str]) -> None:
-    if API_KEY and x_api_key != API_KEY:
+    # hmac.compare_digest instead of != : plain string comparison
+    # short-circuits on the first differing character, which leaks the
+    # key's length and content byte-by-byte via response timing. This
+    # matters more once the API is reachable outside your own machine.
+    if API_KEY and not hmac.compare_digest(x_api_key or "", API_KEY):
         raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key header")
 
 
@@ -142,6 +148,13 @@ def predict(dataset_name: str, request: PredictRequest,
 
     if not request.readings:
         raise HTTPException(status_code=422, detail="'readings' cannot be empty")
+    if len(request.readings) > MAX_READINGS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many readings ({len(request.readings)}); max {MAX_READINGS} "
+                   f"per request. Feature engineering is O(n x windows x columns), "
+                   f"so an unbounded request risks CPU/memory exhaustion.",
+        )
 
     bundle = _load_bundle(dataset_name)
 
@@ -162,7 +175,10 @@ def predict(dataset_name: str, request: PredictRequest,
             f"below used a shorter effective lookback."
         )
 
-    df_feat, _ = features.engineer_features_for_serving(df, bundle["power_curve_reference"])
+    df_feat, _ = features.engineer_features_for_serving(
+        df, bundle["power_curve_reference"],
+        feature_descriptions=bundle.get("feature_descriptions"),
+    )
 
     missing = [c for c in bundle["feature_cols"] if c not in df_feat.columns]
     if missing:

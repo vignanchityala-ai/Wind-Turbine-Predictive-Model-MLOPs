@@ -64,13 +64,19 @@ for p in paths:
 
 md("## 1. Load one anomaly sub-dataset and inspect the schema")
 
-code("""anomaly_paths = [p for p in paths if 'anomaly' in p.stem.lower()]
-normal_paths = [p for p in paths if 'anomaly' not in p.stem.lower()]
+code("""# Filenames are bare integers (e.g. "3.csv") with no label in the name
+# itself -- the real Wind Farm A structure. The label lives in the shared
+# event_info file, so load each and check is_anomaly rather than pattern-
+# matching the filename.
+loaded = [data_loader.load_subdataset(p) for p in paths]
+anomaly_subs = [s for s in loaded if s.is_anomaly]
+normal_subs = [s for s in loaded if not s.is_anomaly]
 
-sub = data_loader.load_subdataset(anomaly_paths[0])
+sub = anomaly_subs[0]
 print("Sub-dataset:", sub.name)
 print("Asset:", sub.asset_id, "| event_label:", sub.event_label)
 print("event_start:", sub.event_start, "| event_end (fault onset):", sub.event_end)
+print("event_description:", sub.event_description)
 print("Shape:", sub.df.shape)
 sub.df.head()
 """)

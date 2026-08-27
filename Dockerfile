@@ -2,8 +2,7 @@
 #
 # NOTE: this image was written and reviewed carefully but NOT build-tested —
 # this sandbox has no Docker daemon available. Run `docker build` locally
-# before deploying anywhere; the most likely thing to need adjusting is
-# pinned versions in requirements.txt if a transitive dependency has moved.
+# before deploying anywhere.
 #
 # Build:
 #   docker build -t wind-turbine-api .
@@ -26,6 +25,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ src/
 COPY models/ models/
+
+# Run as a non-root user: uvicorn (and joblib.load, which deserializes
+# pickled Python objects and could execute arbitrary code if a model file
+# were ever tampered with) don't need root, and running as root maximizes
+# the blast radius of any future code-execution issue for no benefit here.
+RUN useradd --create-home --shell /bin/bash appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000

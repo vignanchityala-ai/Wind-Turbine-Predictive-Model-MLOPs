@@ -1,0 +1,16 @@
+farm: A
+data:
+  raw_dir: data/raw/Wind Farm A
+  bronze_dir: data/bronze
+  silver_dir: data/silver
+  gold_dir: data/gold
+model:
+  kind: isolation_forest
+  training_strategy: turbine
+  contamination: 0.01
+  threshold_percentile: 99.0
+mlflow:
+  tracking_uri: http://localhost:5000
+  experiment_name: wind-turbine-dev
+logging:
+  level: DEBUG
