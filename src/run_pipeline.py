@@ -202,7 +202,7 @@ def main():
                              "-- pass this flag to keep the full engineered "
                              "feature set instead.")
     parser.add_argument("--training-strategy", type=str, default="turbine",
-                        choices=["turbine", "farm"],
+                        choices=["turbine", "farm", "global"],
                         help="'turbine' (default): one model per sub-dataset, "
                              "matching the CARE benchmark's own evaluation "
                              "design -- use this if CARE-score comparability "
@@ -246,6 +246,8 @@ def main():
 
     if args.training_strategy == "farm":
         results, diag_rows = run_farm_strategy(paths, args, feature_descriptions)
+    elif args.training_strategy == "global":
+        results, diag_rows = run_global_strategy(args)
     else:
         results, diag_rows = run_turbine_strategy(paths, args, feature_descriptions)
 

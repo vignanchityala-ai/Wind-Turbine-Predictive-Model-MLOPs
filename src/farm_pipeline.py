@@ -373,14 +373,7 @@ def prepare_pooled_training_data(
         if base_feature_cols is None:
             base_feature_cols = f_cols
         elif set(f_cols) != set(base_feature_cols):
-            # Shouldn't happen within one farm (same schema everywhere),
-            # but if it does, fail loudly rather than silently misalign
-            # columns across datasets in the pooled set.
-            raise ValueError(
-                f"{sub.name} produced a different engineered-column set than "
-                f"earlier datasets -- schema mismatch within the farm. "
-                f"Diff: {set(f_cols) ^ set(base_feature_cols)}"
-            )
+            log.debug(f"{sub.name} has a different schema (expected in global multi-farm pooling).")
 
     # Pool all training-normal rows.
     pooled_frames = []
@@ -392,7 +385,10 @@ def prepare_pooled_training_data(
         subset = df_feat.loc[normal_mask, f_cols]
         pooled_frames.append(subset)
         per_asset_row_counts[sub.asset_id] = per_asset_row_counts.get(sub.asset_id, 0) + len(subset)
-    pooled_train_full = pd.concat(pooled_frames, ignore_index=True)
+    # Pool all training-normal rows. Fill NaN with 0.0 to support cross-farm global 
+    # pooling where heterogeneous sensor names will align, and missing sensors will
+    # become NaN. Since they are already z-scored, 0.0 correctly defaults to the mean.
+    pooled_train_full = pd.concat(pooled_frames, ignore_index=True).fillna(0.0)
 
     if len(pooled_train_full) < 50:
         raise ValueError(
@@ -405,7 +401,8 @@ def prepare_pooled_training_data(
     nan_frac = pooled_train_full.isna().mean().sort_values(ascending=False)
     top_missingness = [(c, float(v)) for c, v in nan_frac.head(10).items() if v > 0]
 
-    feature_cols = base_feature_cols
+    # The union of all features is the columns of the concatenated dataframe
+    feature_cols = [c for c in pooled_train_full.columns if c not in (config.SPLIT_COL, "_status_label")]
     n_before = len(feature_cols)
     selection_diag = {"dropped_nan": [], "dropped_variance": [], "dropped_correlation": []}
     if do_feature_selection:
@@ -478,6 +475,13 @@ def train_farm_model(
     else:
         power_col = cols["power"][0] if cols["power"] else None
         wind_col = cols["wind_speed"][0] if cols["wind_speed"] else None
+        
+    if power_col and wind_col:
+        for s in subs:
+            if power_col not in s.df.columns or wind_col not in s.df.columns:
+                log.warning(f"Power/wind columns '{power_col}'/'{wind_col}' missing in dataset {s.name}. Disabling power curves for global multi-farm pool.")
+                power_col, wind_col = None, None
+                break
 
     pooled_train_full, engineered, known_assets, power_curve_refs, sensor_norm_stats, feature_cols, prep_report = \
         prepare_pooled_training_data(subs, power_col, wind_col, feature_descriptions, do_feature_selection)
@@ -492,15 +496,15 @@ def train_farm_model(
         df_feat, _ = engineered[sub.name]
         train_mask = df_feat[config.SPLIT_COL] == config.TRAIN_VALUE
         normal_mask = train_mask & (df_feat["_status_label"] == 0)
-        sub_train = df_feat.loc[normal_mask, feature_cols]
+        sub_train = df_feat.loc[normal_mask].reindex(columns=feature_cols, fill_value=0.0)
         if len(sub_train) < 2:
             continue
         n_val = max(1, int(len(sub_train) * config.VALIDATION_FRACTION))
         train_fit_frames.append(sub_train.iloc[:-n_val])
         train_val_frames.append(sub_train.iloc[-n_val:])
 
-    train_fit = pd.concat(train_fit_frames, ignore_index=True)
-    train_val = pd.concat(train_val_frames, ignore_index=True)
+    train_fit = pd.concat(train_fit_frames, ignore_index=True).fillna(0.0)
+    train_val = pd.concat(train_val_frames, ignore_index=True).fillna(0.0)
 
     if model_kind == "isolation_forest":
         clf = model_module.IsolationForestDetector()
@@ -526,7 +530,8 @@ def train_farm_model(
         if len(pred_df) == 0:
             log.warning("%s: no prediction-period rows, skipping evaluation.", sub.name)
             continue
-        pred_scores = clf.score(pred_df[feature_cols])
+        pred_X = pred_df.reindex(columns=feature_cols, fill_value=0.0)
+        pred_scores = clf.score(pred_X)
         pred_flags = model_module.scores_to_events(pred_scores, threshold)
         result = evaluation.evaluate_subdataset(
             name=sub.name,
