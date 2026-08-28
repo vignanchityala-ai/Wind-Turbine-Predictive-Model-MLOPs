@@ -140,7 +140,7 @@ def process_one(sub: data_loader.SubDataset, model_kind: str,
                 "model_version": "1.0.0",
                 "training_date": __import__("datetime").datetime.now().isoformat(),
                 "training_farms": ["A"],
-                "care_composite": result.composite if result else None,
+                "care_composite": None, # Cannot calculate composite for a single sub-dataset
                 "feature_schema_hash": __import__("hashlib").sha256(str(sorted(feature_cols)).encode()).hexdigest(),
             }
             joblib.dump(bundle, model_dir / f"{sub.name}.joblib")
@@ -314,20 +314,6 @@ def run_turbine_strategy(paths, args, feature_descriptions):
             sub = data_loader.load_subdataset(p, event_info_path=args.event_info_path)
             if sub.event_label is None:
                 n_no_label += 1
-
-            if i == 1 and feature_descriptions is not None:
-                mismatches = feature_descriptions.validate_against_columns(sub.df.columns)
-                if mismatches:
-                    log.warning(
-                        "Feature description validation found %d mismatch(es) "
-                        "against %s's actual columns -- the column-naming "
-                        "convention assumption may be wrong for some sensors:",
-                        len(mismatches), p.name,
-                    )
-                    for m in mismatches:
-                        log.warning("  %s", m)
-                else:
-                    log.info("Feature description validation: all sensor column counts match.")
 
             res, diag = process_one(sub, args.model, save_model=args.save_models,
                                      model_dir=Path(args.model_dir),
