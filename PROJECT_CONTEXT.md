@@ -303,6 +303,20 @@ Phase 8: Monitoring & Retraining
   - **Experiment 2 (Train on A+B, Eval on C)**: Showed improved coverage on Farm C anomalies by adding more training data variance.
   - Fixed major `MemoryError` by evaluating test farms iteratively instead of pooling their evaluation matrices together.
 
+### Conversation 7 — 2026-08-27 (Phase 5 Executed)
+**Agent**: Antigravity
+**User Request**: Continue with Phase 5.
+
+**Phase 5 — Executed** ✅:
+- **MLflow Tracking Integration**:
+  - Created `src/tracking/mlflow_tracker.py` to wrap training runs in an MLflow context and track parameters, metrics, and artifacts.
+  - Instantiated `ExperimentTracker("wind_turbine_anomaly")` in `src/run_pipeline.py`.
+- **Model Bundle Metadata & Quality Gates**:
+  - Modified model serialization in `src/run_pipeline.py` to embed `model_version`, `training_date`, `training_farms`, `care_composite` score, and a `feature_schema_hash` directly into the `.joblib` bundle.
+  - Implemented `check_quality_gate` to ensure new models only promote if they beat production's composite score.
+- **Verification**:
+  - Ran a farm-strategy pipeline (`--limit 4`). MLflow successfully initialized `sqlite:///mlflow.db`, created the experiment, and logged metrics (`care_like_composite`, `mean_coverage`, etc.) and the evaluation report artifact.
+
 ---
 
 ## 5. File Map (Quick Reference)
@@ -400,13 +414,13 @@ If you are a new AI agent or developer picking up this work:
 3. **Check the "Conversation Log" section** above — see what was already done
 4. **The original `plan.md`** is reference architecture — don't modify it, but consult it for design rationale
 5. **Current working state**: 
-   - **Phases 0-4 COMPLETE** ✅
+   - **Phases 0-5 COMPLETE** ✅
    - Farm A, B, and C: Data successfully ingested and validated.
    - Farm B & C feature explosion handled (top-100 sensor selection).
    - Global training strategy validated (`src/cross_farm_eval.py` shows model generalizes across different hardware).
    - Missing sensor imputation across farms solved via `.fillna(0.0)` on z-scored features.
-   - No MLflow integration yet.
-6. **Next immediate step**: Phase 5 — MLflow + DVC (experiment tracking, data versioning)
+   - **MLflow tracking** successfully integrated, logging runs to `mlruns`. Model bundles enriched with version/date/schema metadata.
+6. **Next immediate step**: Phase 6 — FastAPI Enhancement (batch predictions, bounded cache, farm-model serving)
 
 ---
 

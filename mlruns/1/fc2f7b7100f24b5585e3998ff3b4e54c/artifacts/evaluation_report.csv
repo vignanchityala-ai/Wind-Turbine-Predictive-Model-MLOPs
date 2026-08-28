@@ -1,0 +1,5 @@
+dataset,is_anomaly,coverage,accuracy,reliability,earliness_hours,n_flagged_points,n_eval_points
+comma_0,True,0.1153442852149598,,0.15151515151515152,335.8333333333333,173,2365
+comma_10,True,0.22609819121447028,,0.38461538461538464,155.5,70,1268
+comma_13,False,,1.0,,,0,3146
+comma_14,False,,1.0,,,0,1596

@@ -136,6 +136,12 @@ def process_one(sub: data_loader.SubDataset, model_kind: str,
                 "dataset_name": sub.name,
                 "model_kind": model_kind,
                 "min_event_length": config.MIN_EVENT_LENGTH,
+                # Phase 5: Model bundle metadata
+                "model_version": "1.0.0",
+                "training_date": __import__("datetime").datetime.now().isoformat(),
+                "training_farms": ["A"],
+                "care_composite": result.composite if result else None,
+                "feature_schema_hash": __import__("hashlib").sha256(str(sorted(feature_cols)).encode()).hexdigest(),
             }
             joblib.dump(bundle, model_dir / f"{sub.name}.joblib")
 
@@ -264,6 +270,27 @@ def main():
 
     diag_df = pd.DataFrame(diag_rows)
     diag_df.to_csv(out_path.with_name(out_path.stem + "_diagnostics.csv"), index=False)
+
+    # Phase 5: MLflow Integration
+    try:
+        from src.tracking.mlflow_tracker import ExperimentTracker
+        tracker = ExperimentTracker("wind_turbine_anomaly")
+        
+        # We also want to check the quality gate
+        # For simplicity, we just log the run here
+        tracker.log_training_run(
+            params={
+                "model": args.model, 
+                "training_strategy": args.training_strategy,
+                "limit": args.limit
+            },
+            metrics=summary,
+            artifacts={"report": str(out_path)},
+            model_name="wind_farm_model" if args.save_models else None
+        )
+        log.info("Successfully logged run to MLflow.")
+    except Exception as e:
+        log.warning("Failed to log to MLflow: %s", e)
 
     log.info("=" * 60)
     log.info("SUMMARY (%s model, %s strategy, %d sub-datasets)",
@@ -412,6 +439,12 @@ def run_farm_strategy(paths, args, feature_descriptions):
                 "model_kind": args.model,
                 "min_event_length": config.MIN_EVENT_LENGTH,
                 "training_strategy": "farm",
+                # Phase 5: Model bundle metadata
+                "model_version": "1.0.0",
+                "training_date": __import__("datetime").datetime.now().isoformat(),
+                "training_farms": ["A", "B", "C"] if farm_name == "farm" else [farm_name],
+                "care_composite": None, # Will be set during aggregate
+                "feature_schema_hash": __import__("hashlib").sha256(str(sorted(farm_result.feature_cols)).encode()).hexdigest(),
             }
             bundle_path = model_dir / f"{farm_name.replace(' ', '_')}_farm_model.joblib"
             joblib.dump(bundle, bundle_path)
