@@ -63,12 +63,18 @@ import hmac
 import os
 from typing import Optional
 
+from datetime import datetime
+from functools import lru_cache
+import io
+
 import joblib
 import pandas as pd
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File
 from pydantic import BaseModel
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from . import config, features
+from .model import scores_to_events
 
 app = FastAPI(
     title="Wind Turbine Early Fault Detection API",
@@ -80,8 +86,8 @@ app = FastAPI(
 API_KEY = os.environ.get("API_KEY")  # unset = auth disabled (local dev only)
 MAX_READINGS = 1000  # ~1 week at 10-min resolution; see _check_readings_size
 
-_MODEL_CACHE: dict[str, dict] = {}
-
+# Step 6.5 — Install Prometheus metrics
+Instrumentator().instrument(app).expose(app)
 
 def _check_auth(x_api_key: Optional[str]) -> None:
     # hmac.compare_digest instead of != : plain string comparison
@@ -98,19 +104,19 @@ def _list_available_models() -> list[str]:
     return sorted(p.stem for p in config.MODEL_DIR.glob("*.joblib"))
 
 
+@lru_cache(maxsize=10)
 def _load_bundle(dataset_name: str) -> dict:
-    if dataset_name in _MODEL_CACHE:
-        return _MODEL_CACHE[dataset_name]
+    # Look for both exact match and farm model
     path = config.MODEL_DIR / f"{dataset_name}.joblib"
     if not path.exists():
-        available = _list_available_models()
-        raise HTTPException(
-            status_code=404,
-            detail=f"No trained model found for '{dataset_name}'. Available: {available}",
-        )
-    bundle = joblib.load(path)
-    _MODEL_CACHE[dataset_name] = bundle
-    return bundle
+        path = config.MODEL_DIR / f"{dataset_name}_farm_model.joblib"
+        if not path.exists():
+            available = _list_available_models()
+            raise HTTPException(
+                status_code=404,
+                detail=f"No trained model found for '{dataset_name}'. Available: {available}",
+            )
+    return joblib.load(path)
 
 
 class PredictRequest(BaseModel):
@@ -127,6 +133,13 @@ class PredictResponse(BaseModel):
     min_event_length: int
     n_readings_used: int
     warning: Optional[str] = None
+
+
+class BatchPredictResponse(BaseModel):
+    events: list[dict]  # [{event_id, start, end, duration_hours, peak_score, mean_score}]
+    per_row_scores: list[float]
+    threshold: float
+    n_readings: int
 
 
 @app.get("/health")
@@ -175,6 +188,16 @@ def predict(dataset_name: str, request: PredictRequest,
             f"below used a shorter effective lookback."
         )
 
+    # Step 6.4 — Data freshness check
+    latest_ts = df[config.TIME_COL].iloc[-1]
+    data_age = (datetime.now() - latest_ts).total_seconds() / 60
+    if data_age > 60:
+        warning_msg = f"Data is {data_age:.0f} minutes old"
+        if warning:
+            warning += " | " + warning_msg
+        else:
+            warning = warning_msg
+
     df_feat, _ = features.engineer_features_for_serving(
         df, bundle["power_curve_reference"],
         feature_descriptions=bundle.get("feature_descriptions"),
@@ -194,7 +217,7 @@ def predict(dataset_name: str, request: PredictRequest,
 
     return PredictResponse(
         dataset_name=dataset_name,
-        asset_id=bundle.get("asset_id"),
+        asset_id=str(bundle.get("asset_id")) if bundle.get("asset_id") is not None else None,
         latest_timestamp=str(df[config.TIME_COL].iloc[-1]),
         anomaly_score=score,
         threshold=bundle["threshold"],
@@ -203,3 +226,120 @@ def predict(dataset_name: str, request: PredictRequest,
         n_readings_used=len(df),
         warning=warning,
     )
+
+
+@app.post("/batch_predict/{dataset_name}", response_model=BatchPredictResponse)
+async def batch_predict(dataset_name: str, file: UploadFile = File(...), x_api_key: Optional[str] = Header(default=None)):
+    _check_auth(x_api_key)
+    
+    contents = await file.read()
+    df = pd.read_csv(io.BytesIO(contents))
+    
+    if config.TIME_COL not in df.columns:
+        raise HTTPException(status_code=422, detail=f"CSV needs '{config.TIME_COL}' column")
+    df[config.TIME_COL] = pd.to_datetime(df[config.TIME_COL], errors="coerce")
+    df = df.sort_values(config.TIME_COL).reset_index(drop=True)
+    
+    bundle = _load_bundle(dataset_name)
+    pc_ref = bundle.get("power_curve_reference")
+    
+    df_feat, _ = features.engineer_features_for_serving(
+        df, pc_ref,
+        feature_descriptions=bundle.get("feature_descriptions")
+    )
+    
+    missing = [c for c in bundle["feature_cols"] if c not in df_feat.columns]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Missing columns: {missing[:5]}")
+        
+    X = df_feat[bundle["feature_cols"]].fillna(0.0)
+    scores = bundle["detector"].score(X)
+    
+    flags = scores_to_events(scores, bundle["threshold"], bundle.get("min_event_length", 1))
+    
+    events_list = []
+    current_event = None
+    
+    for i, flag in enumerate(flags):
+        if flag == 1:
+            if current_event is None:
+                current_event = {"start_idx": i, "scores": [scores[i]]}
+            else:
+                current_event["scores"].append(scores[i])
+        else:
+            if current_event is not None:
+                end_idx = i - 1
+                start_time = df[config.TIME_COL].iloc[current_event["start_idx"]]
+                end_time = df[config.TIME_COL].iloc[end_idx]
+                events_list.append({
+                    "event_id": len(events_list) + 1,
+                    "start": str(start_time),
+                    "end": str(end_time),
+                    "duration_hours": (end_time - start_time).total_seconds() / 3600.0,
+                    "peak_score": float(max(current_event["scores"])),
+                    "mean_score": float(sum(current_event["scores"]) / len(current_event["scores"]))
+                })
+                current_event = None
+                
+    if current_event is not None:
+        end_idx = len(flags) - 1
+        start_time = df[config.TIME_COL].iloc[current_event["start_idx"]]
+        end_time = df[config.TIME_COL].iloc[end_idx]
+        events_list.append({
+            "event_id": len(events_list) + 1,
+            "start": str(start_time),
+            "end": str(end_time),
+            "duration_hours": (end_time - start_time).total_seconds() / 3600.0,
+            "peak_score": float(max(current_event["scores"])),
+            "mean_score": float(sum(current_event["scores"]) / len(current_event["scores"]))
+        })
+        
+    return BatchPredictResponse(
+        events=events_list,
+        per_row_scores=scores.tolist(),
+        threshold=bundle["threshold"],
+        n_readings=len(df)
+    )
+
+@app.post("/predict/farm/{farm_name}", response_model=PredictResponse)
+def predict_farm(farm_name: str, request: PredictRequest, x_api_key: Optional[str] = Header(default=None)):
+    # Reuses predict endpoint logic but explicitly targets the farm model
+    return predict(farm_name, request, x_api_key)
+
+@app.get("/model/info/{model_name}")
+def get_model_info(model_name: str, x_api_key: Optional[str] = Header(default=None)):
+    _check_auth(x_api_key)
+    bundle = _load_bundle(model_name)
+    return {
+        "dataset_name": bundle.get("dataset_name", model_name),
+        "farm_name": bundle.get("farm_name"),
+        "model_version": bundle.get("model_version"),
+        "training_date": bundle.get("training_date"),
+        "training_farms": bundle.get("training_farms"),
+        "care_composite": bundle.get("care_composite"),
+        "feature_schema_hash": bundle.get("feature_schema_hash"),
+        "threshold": bundle.get("threshold"),
+        "n_features": len(bundle.get("feature_cols", []))
+    }
+
+@app.get("/farms")
+def list_farms(x_api_key: Optional[str] = Header(default=None)):
+    _check_auth(x_api_key)
+    farms = {}
+    if hasattr(config, 'FARM_CONFIGS'):
+        for name in config.FARM_CONFIGS.keys():
+            model_path = config.MODEL_DIR / f"{name.replace(' ', '_')}_farm_model.joblib"
+            farms[name] = {
+                "name": name,
+                "has_model": model_path.exists()
+            }
+    else:
+        # Fallback if FARM_CONFIGS is not explicitly defined in config
+        for f in config.RAW_DATA_DIR.iterdir():
+            if f.is_dir():
+                model_path = config.MODEL_DIR / f"{f.name.replace(' ', '_')}_farm_model.joblib"
+                farms[f.name] = {
+                    "name": f.name,
+                    "has_model": model_path.exists()
+                }
+    return {"farms": farms}

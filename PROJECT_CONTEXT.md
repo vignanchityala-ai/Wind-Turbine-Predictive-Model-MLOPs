@@ -317,6 +317,21 @@ Phase 8: Monitoring & Retraining
 - **Verification**:
   - Ran a farm-strategy pipeline (`--limit 4`). MLflow successfully initialized `sqlite:///mlflow.db`, created the experiment, and logged metrics (`care_like_composite`, `mean_coverage`, etc.) and the evaluation report artifact.
 
+### Conversation 8 — 2026-08-28 (Phase 6 Executed)
+**Agent**: Antigravity
+**User Request**: Continue with Phase 6.
+
+**Phase 6 — Executed** ✅:
+- **FastAPI Cache & Perf**: Replaced unbounded `_MODEL_CACHE` dict with `@lru_cache(maxsize=10)` to prevent memory leaks during inference.
+- **New Endpoints**:
+  - `/batch_predict/{dataset_name}` (POST): Accepts CSV uploads, engineers features, and groups scores into actionable continuous `events`.
+  - `/predict/farm/{farm_name}` (POST): Farm-level model serving endpoint.
+  - `/model/info/{model_name}` (GET): Fetches model version, training dates, and schema metadata.
+  - `/farms` (GET): Lists available farms and model readiness.
+- **Data Freshness Warning**: The `/predict` endpoint now inspects the latest timestamp in the requested batch. If the data is > 60 minutes old, it appends a `warning` directly to the `PredictResponse` (e.g., `"Data is 2111455 minutes old"`).
+- **Prometheus Metrics**: Bootstrapped `/metrics` for standard API observability using `prometheus-fastapi-instrumentator`.
+- **Verification**: `pytest tests/smoke_test_api.py` completes without errors and correctly validates API structure and `data_age` warning outputs.
+
 ---
 
 ## 5. File Map (Quick Reference)
@@ -414,13 +429,14 @@ If you are a new AI agent or developer picking up this work:
 3. **Check the "Conversation Log" section** above — see what was already done
 4. **The original `plan.md`** is reference architecture — don't modify it, but consult it for design rationale
 5. **Current working state**: 
-   - **Phases 0-5 COMPLETE** ✅
+   - **Phases 0-6 COMPLETE** ✅
    - Farm A, B, and C: Data successfully ingested and validated.
    - Farm B & C feature explosion handled (top-100 sensor selection).
    - Global training strategy validated (`src/cross_farm_eval.py` shows model generalizes across different hardware).
    - Missing sensor imputation across farms solved via `.fillna(0.0)` on z-scored features.
    - **MLflow tracking** successfully integrated, logging runs to `mlruns`. Model bundles enriched with version/date/schema metadata.
-6. **Next immediate step**: Phase 6 — FastAPI Enhancement (batch predictions, bounded cache, farm-model serving)
+   - **FastAPI Enhancement**: Bounded caching, batch CSV predict endpoints, farm-model inference, data freshness validation, and Prometheus metrics are live.
+6. **Next immediate step**: Phase 7 — Dashboard (Streamlit)
 
 ---
 
