@@ -63,3 +63,6 @@ jobs:
 
           kill $SERVER_PID 2>/dev/null || true
           exit $TEST_EXIT
+
+      - name: Verify Docker API Image Builds Successfully
+        run: docker build -f docker/Dockerfile.api -t wt-api .

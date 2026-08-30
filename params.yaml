@@ -1,0 +1,7 @@
+model_kind: isolation_forest
+training_strategy: farm
+contamination: 0.01
+threshold_percentile: 99.0
+rolling_windows: [6, 18, 36]
+validation_fraction: 0.2
+min_event_length: 6

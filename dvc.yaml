@@ -1,0 +1,40 @@
+stages:
+  ingest:
+    cmd: python -c "from src.data.ingestion import ingest_farm; ingest_farm('A')"
+    deps: 
+      - data/raw/Wind Farm A
+    outs: 
+      - data/bronze/farm=A
+  
+  silver:
+    cmd: python -c "from src.data.silver import process_farm_to_silver; process_farm_to_silver('A')"
+    deps: 
+      - data/bronze/farm=A
+    outs: 
+      - data/silver/farm=A
+  
+  gold:
+    cmd: python -c "from src.data.feature_pipeline import process_farm_to_gold; process_farm_to_gold('A')"
+    deps: 
+      - data/silver/farm=A
+    outs: 
+      - data/gold/farm=A
+  
+  train:
+    cmd: python -m src.run_pipeline --training-strategy farm
+    deps: 
+      - data/gold/farm=A
+      - src/model.py
+      - src/features.py
+      - src/run_pipeline.py
+      - src/farm_pipeline.py
+    outs: 
+      - models/
+    params: 
+      - model_kind
+      - training_strategy
+      - contamination
+      - threshold_percentile
+      - rolling_windows
+      - validation_fraction
+      - min_event_length

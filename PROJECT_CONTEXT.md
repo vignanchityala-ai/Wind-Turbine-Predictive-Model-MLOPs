@@ -348,6 +348,18 @@ Phase 8: Monitoring & Retraining
   - `04_Model_Performance.py`: Pulls CARE scores, schema hashes, and MLflow metadata from the server.
   - `05_Monitoring.py`: Real-time system monitoring scraping the Prometheus endpoint for simulated API latencies.
 
+### Conversation 10 — 2026-08-30 (Phase 8 Executed)
+**Agent**: Antigravity
+**User Request**: Continue with Phase 8.
+
+**Phase 8 — Executed** ✅:
+- **DVC Initialization**: Installed DVC and initialized tracking to solve the Git large-file tracking issues. Created `dvc.yaml` mapping the pipeline stages (`ingest`, `silver`, `gold`, `train`) and `params.yaml` for hyperparameter tracking.
+- **Dockerization**:
+  - `docker/Dockerfile.api`: Containerized the FastAPI backend (Python 3.10 slim, exposes port 8000).
+  - `docker/Dockerfile.dashboard`: Containerized the Streamlit frontend.
+  - `docker-compose.yml`: Configured to spin up `api`, `dashboard`, and an `mlflow` tracking server in a unified local microservices network.
+- **CI/CD Pipeline Upgrade**: Appended a `docker build` step to `.github/workflows/ci.yml` to strictly enforce that the API container image compiles correctly on every push/PR without syntax or dependency errors.
+
 ---
 
 ## 5. File Map (Quick Reference)
@@ -445,7 +457,7 @@ If you are a new AI agent or developer picking up this work:
 3. **Check the "Conversation Log" section** above — see what was already done
 4. **The original `plan.md`** is reference architecture — don't modify it, but consult it for design rationale
 5. **Current working state**: 
-   - **Phases 0-7 COMPLETE** ✅
+   - **Phases 0-8 COMPLETE** ✅
    - Farm A, B, and C: Data successfully ingested and validated.
    - Farm B & C feature explosion handled (top-100 sensor selection).
    - Global training strategy validated (`src/cross_farm_eval.py` shows model generalizes across different hardware).
@@ -453,7 +465,8 @@ If you are a new AI agent or developer picking up this work:
    - **MLflow tracking** successfully integrated, logging runs to `mlruns`. Model bundles enriched with version/date/schema metadata.
    - **FastAPI Enhancement**: Bounded caching, batch CSV predict endpoints, farm-model inference, data freshness validation, and Prometheus metrics are live.
    - **Streamlit Dashboard**: A fully decoupled, multi-page interactive UI is running on port 8501 with rich visual aesthetics, deep-dive power curve analysis, and API health monitoring.
-6. **Next immediate step**: Phase 8 — MLOps Automation (DVC & Actions)
+   - **MLOps Automation**: DVC tracks the pipeline stages/hyperparameters, Docker microservices orchestrate the stack, and GitHub Actions CI pipelines validate Docker image builds.
+6. **Next immediate step**: Phase 9 — Monitoring + Retraining
 
 ---
 

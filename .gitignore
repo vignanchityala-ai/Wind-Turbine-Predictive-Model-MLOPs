@@ -14,6 +14,9 @@ env/
 # Data — keep folder structure, not contents (large datasets belong in DVC or remote lake)
 data/*
 !data/.gitkeep
+!data/*.dvc
+!data/**/*.dvc
+!data/**/.gitignore
 !data/raw/
 data/raw/*
 !data/raw/.gitkeep
