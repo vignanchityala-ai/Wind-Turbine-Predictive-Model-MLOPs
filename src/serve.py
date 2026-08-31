@@ -75,6 +75,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from . import config, features
 from .model import scores_to_events
+from .farm_pipeline import apply_sensor_normalization
 from src.monitoring.freshness import check_data_freshness
 
 app = FastAPI(
@@ -200,8 +201,17 @@ def predict(dataset_name: str, request: PredictRequest,
         else:
             warning = rec_warning
 
+    asset_id = df.get(config.ASSET_COL, pd.Series([None])).iloc[0]
+    if "power_curve_references" in bundle:
+        pc_ref = bundle["power_curve_references"].get(asset_id)
+        asset_stats = bundle["sensor_normalization"].get(asset_id, {})
+        sensor_cols = list(asset_stats.keys())
+        df = apply_sensor_normalization(df, asset_stats, sensor_cols)
+    else:
+        pc_ref = bundle.get("power_curve_reference")
+
     df_feat, _ = features.engineer_features_for_serving(
-        df, bundle["power_curve_reference"],
+        df, pc_ref,
         feature_descriptions=bundle.get("feature_descriptions"),
     )
 
@@ -243,7 +253,14 @@ async def batch_predict(dataset_name: str, file: UploadFile = File(...), x_api_k
     df = df.sort_values(config.TIME_COL).reset_index(drop=True)
     
     bundle = _load_bundle(dataset_name)
-    pc_ref = bundle.get("power_curve_reference")
+    asset_id = df.get(config.ASSET_COL, pd.Series([None])).iloc[0]
+    if "power_curve_references" in bundle:
+        pc_ref = bundle["power_curve_references"].get(asset_id)
+        asset_stats = bundle["sensor_normalization"].get(asset_id, {})
+        sensor_cols = list(asset_stats.keys())
+        df = apply_sensor_normalization(df, asset_stats, sensor_cols)
+    else:
+        pc_ref = bundle.get("power_curve_reference")
     
     df_feat, _ = features.engineer_features_for_serving(
         df, pc_ref,
@@ -330,7 +347,7 @@ def list_farms(x_api_key: Optional[str] = Header(default=None)):
     farms = {}
     if hasattr(config, 'FARM_CONFIGS'):
         for name in config.FARM_CONFIGS.keys():
-            model_path = config.MODEL_DIR / f"{name.replace(' ', '_')}_farm_model.joblib"
+            model_path = config.MODEL_DIR / f"Wind_Farm_{name}_farm_model.joblib"
             farms[name] = {
                 "name": name,
                 "has_model": model_path.exists()

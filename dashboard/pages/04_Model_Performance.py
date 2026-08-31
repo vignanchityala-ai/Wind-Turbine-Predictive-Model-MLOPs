@@ -19,7 +19,7 @@ if not farms_data:
     st.stop()
 
 selected_farm = st.selectbox("Select Farm Model", options=list(farms_data.keys()))
-model_name = f"{selected_farm.replace(' ', '_')}_farm_model"
+model_name = f"Wind_Farm_{selected_farm}_farm_model"
 info = st.session_state.api.get_model_info(model_name)
 
 if not info:

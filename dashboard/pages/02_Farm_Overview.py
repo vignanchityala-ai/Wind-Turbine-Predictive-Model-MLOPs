@@ -29,7 +29,7 @@ for i, (farm_name, info) in enumerate(farms_data.items()):
             st.markdown("<div class='status-normal'>🟢 Global Model Ready</div>", unsafe_allow_html=True)
             
             # Fetch model info
-            model_name = f"{farm_name.replace(' ', '_')}_farm_model"
+            model_name = f"Wind_Farm_{farm_name}_farm_model"
             m_info = st.session_state.api.get_model_info(model_name)
             
             st.write(f"**Version:** {m_info.get('model_version', 'N/A')}")
