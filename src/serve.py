@@ -75,6 +75,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from . import config, features
 from .model import scores_to_events
+from src.monitoring.freshness import check_data_freshness
 
 app = FastAPI(
     title="Wind Turbine Early Fault Detection API",
@@ -179,24 +180,25 @@ def predict(dataset_name: str, request: PredictRequest,
         raise HTTPException(status_code=422, detail=f"One or more '{config.TIME_COL}' values failed to parse")
     df = df.sort_values(config.TIME_COL).reset_index(drop=True)
 
+    # Use standard freshness check
+    latest_ts = df[config.TIME_COL].iloc[-1]
+    is_fresh, age_mins = check_data_freshness(latest_ts, max_age_minutes=60)
+    
     warning = None
+    if not is_fresh:
+        warning = f"Data is {int(age_mins)} minutes old"
+
     min_recommended = max(config.ROLLING_WINDOWS)
     if len(df) < min_recommended:
-        warning = (
+        rec_warning = (
             f"Only {len(df)} readings supplied; recommend >= {min_recommended} "
             f"(6h of 10-min data) for reliable rolling features. The score "
             f"below used a shorter effective lookback."
         )
-
-    # Step 6.4 — Data freshness check
-    latest_ts = df[config.TIME_COL].iloc[-1]
-    data_age = (datetime.now() - latest_ts).total_seconds() / 60
-    if data_age > 60:
-        warning_msg = f"Data is {data_age:.0f} minutes old"
         if warning:
-            warning += " | " + warning_msg
+            warning += " | " + rec_warning
         else:
-            warning = warning_msg
+            warning = rec_warning
 
     df_feat, _ = features.engineer_features_for_serving(
         df, bundle["power_curve_reference"],

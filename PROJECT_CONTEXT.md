@@ -360,6 +360,14 @@ Phase 8: Monitoring & Retraining
   - `docker-compose.yml`: Configured to spin up `api`, `dashboard`, and an `mlflow` tracking server in a unified local microservices network.
 - **CI/CD Pipeline Upgrade**: Appended a `docker build` step to `.github/workflows/ci.yml` to strictly enforce that the API container image compiles correctly on every push/PR without syntax or dependency errors.
 
+### Conversation 11 — 2026-08-30 (Phase 9 Executed)
+**Agent**: Antigravity
+**User Request**: Continue with Phase 9.
+
+**Phase 9 — Executed** ✅:
+- **ML Feature Drift (PSI)**: Created `src/monitoring/drift.py` which calculates Population Stability Index (PSI) using numpy histograms. A `check_drift` scanner flags features crossing a 0.2 threshold. A `should_retrain` boolean trigger evaluates age and drift metrics.
+- **Data Freshness Engine**: Created `src/monitoring/freshness.py` and decoupled the age checking logic. Integrated this directly into `src/serve.py` so the API continues warning downstream consumers if payloads exceed the 60-minute freshness guardrail.
+
 ---
 
 ## 5. File Map (Quick Reference)
@@ -457,7 +465,7 @@ If you are a new AI agent or developer picking up this work:
 3. **Check the "Conversation Log" section** above — see what was already done
 4. **The original `plan.md`** is reference architecture — don't modify it, but consult it for design rationale
 5. **Current working state**: 
-   - **Phases 0-8 COMPLETE** ✅
+   - **Phases 0-9 COMPLETE** ✅
    - Farm A, B, and C: Data successfully ingested and validated.
    - Farm B & C feature explosion handled (top-100 sensor selection).
    - Global training strategy validated (`src/cross_farm_eval.py` shows model generalizes across different hardware).
@@ -466,7 +474,8 @@ If you are a new AI agent or developer picking up this work:
    - **FastAPI Enhancement**: Bounded caching, batch CSV predict endpoints, farm-model inference, data freshness validation, and Prometheus metrics are live.
    - **Streamlit Dashboard**: A fully decoupled, multi-page interactive UI is running on port 8501 with rich visual aesthetics, deep-dive power curve analysis, and API health monitoring.
    - **MLOps Automation**: DVC tracks the pipeline stages/hyperparameters, Docker microservices orchestrate the stack, and GitHub Actions CI pipelines validate Docker image builds.
-6. **Next immediate step**: Phase 9 — Monitoring + Retraining
+   - **Monitoring & Retraining**: Feature drift scanning using Population Stability Index (PSI) is implemented alongside decoupled real-time data freshness API guardrails.
+6. **Next immediate step**: Phase 10 — Cloud Deployment (Azure)
 
 ---
 
