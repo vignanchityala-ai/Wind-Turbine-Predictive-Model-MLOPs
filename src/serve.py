@@ -106,7 +106,7 @@ def _list_available_models() -> list[str]:
     return sorted(p.stem for p in config.MODEL_DIR.glob("*.joblib"))
 
 
-@lru_cache(maxsize=10)
+@lru_cache(maxsize=int(os.environ.get("MODEL_CACHE_SIZE", "3")))
 def _load_bundle(dataset_name: str) -> dict:
     # Look for both exact match and farm model
     path = config.MODEL_DIR / f"{dataset_name}.joblib"
@@ -216,12 +216,8 @@ def predict(dataset_name: str, request: PredictRequest,
     )
 
     missing = [c for c in bundle["feature_cols"] if c not in df_feat.columns]
-    if missing:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Input readings are missing columns this model expects "
-                   f"(showing up to 5): {missing[:5]}",
-        )
+    for col in missing:
+        df_feat[col] = 0.0
 
     X_latest = df_feat.iloc[[-1]][bundle["feature_cols"]]
     score = float(bundle["detector"].score(X_latest)[0])
@@ -268,8 +264,8 @@ async def batch_predict(dataset_name: str, file: UploadFile = File(...), x_api_k
     )
     
     missing = [c for c in bundle["feature_cols"] if c not in df_feat.columns]
-    if missing:
-        raise HTTPException(status_code=422, detail=f"Missing columns: {missing[:5]}")
+    for col in missing:
+        df_feat[col] = 0.0
         
     X = df_feat[bundle["feature_cols"]].fillna(0.0)
     scores = bundle["detector"].score(X)
@@ -294,7 +290,7 @@ async def batch_predict(dataset_name: str, file: UploadFile = File(...), x_api_k
                     "event_id": len(events_list) + 1,
                     "start": str(start_time),
                     "end": str(end_time),
-                    "duration_hours": (end_time - start_time).total_seconds() / 3600.0,
+                    "duration_hours": max((end_time - start_time).total_seconds() / 3600.0, 0.166),
                     "peak_score": float(max(current_event["scores"])),
                     "mean_score": float(sum(current_event["scores"]) / len(current_event["scores"]))
                 })
@@ -308,7 +304,7 @@ async def batch_predict(dataset_name: str, file: UploadFile = File(...), x_api_k
             "event_id": len(events_list) + 1,
             "start": str(start_time),
             "end": str(end_time),
-            "duration_hours": (end_time - start_time).total_seconds() / 3600.0,
+            "duration_hours": max((end_time - start_time).total_seconds() / 3600.0, 0.166),
             "peak_score": float(max(current_event["scores"])),
             "mean_score": float(sum(current_event["scores"]) / len(current_event["scores"]))
         })

@@ -23,7 +23,7 @@ if health["status"] != "ok":
 
 # We need a dedicated endpoint to get all models, or we can use /models. Wait, /models exists!
 import requests
-models_resp = requests.get(f"{st.session_state.api.base_url}/models")
+models_resp = requests.get(f"{st.session_state.api.base_url}/models", headers=st.session_state.api._get_headers())
 model_names = models_resp.json().get("models", []) if models_resp.status_code == 200 else []
 
 if not model_names:
@@ -37,7 +37,7 @@ with col1:
 with col2:
     uploaded_file = st.file_uploader("Upload SCADA CSV", type=["csv"])
 
-if uploaded_file and st.button("Run Batch Prediction"):
+if st.button("Run Batch Prediction", disabled=uploaded_file is None):
     with st.spinner("Analyzing data through FastAPI..."):
         file_bytes = uploaded_file.getvalue()
         resp = st.session_state.api.batch_predict(selected_model, file_bytes)

@@ -33,7 +33,8 @@ for i, (farm_name, info) in enumerate(farms_data.items()):
             m_info = st.session_state.api.get_model_info(model_name)
             
             st.write(f"**Version:** {m_info.get('model_version', 'N/A')}")
-            st.write(f"**Trained:** {m_info.get('training_date', 'N/A')[:10]}")
+            t_date = m_info.get('training_date') or 'N/A'
+            st.write(f"**Trained:** {t_date[:10]}")
             st.write(f"**Features:** {m_info.get('n_features', 0)}")
             
             if st.button("Run Farm Prediction", key=farm_name):

@@ -23,3 +23,7 @@ matplotlib
 
 # Optional: only needed if you use --model autoencoder
 # tensorflow>=2.13
+
+# QA & Testing
+pytest>=7.0.0
+pytest-cov>=4.1.0

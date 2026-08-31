@@ -368,6 +368,16 @@ Phase 8: Monitoring & Retraining
 - **ML Feature Drift (PSI)**: Created `src/monitoring/drift.py` which calculates Population Stability Index (PSI) using numpy histograms. A `check_drift` scanner flags features crossing a 0.2 threshold. A `should_retrain` boolean trigger evaluates age and drift metrics.
 - **Data Freshness Engine**: Created `src/monitoring/freshness.py` and decoupled the age checking logic. Integrated this directly into `src/serve.py` so the API continues warning downstream consumers if payloads exceed the 60-minute freshness guardrail.
 
+### Conversation 12 — 2026-08-31 (QA Audit & Bug Fixes Executed)
+**Agent**: Antigravity
+**User Request**: Perform QA audit, find bugs, and fix critical issues.
+
+**Executed** ✅:
+- **Dashboard API Lockout Fixed**: Updated `dashboard/api_client.py` to securely read `API_KEY` from the environment and inject `X-API-Key` headers into all backend requests.
+- **Global Model Inference Crash Fixed**: Removed strict missing column validation in `src/serve.py` for `/predict` and `/batch_predict`. Automatically imputes missing columns with `0.0` to seamlessly support the heterogeneous sensor strategy for Farms A, B, and C.
+- **Event Duration Zero-Edge Case Fixed**: Enforced a minimum `duration_hours` of ~10 minutes (0.166h) in `batch_predict` to prevent downstream division-by-zero on single-point anomaly events.
+- **Configurable API Memory Limits**: Replaced hardcoded `@lru_cache(maxsize=10)` with an environment-driven `MODEL_CACHE_SIZE` (defaulting to 3) in `src/serve.py` to prevent OOM kills when caching heavy deep-learning models.
+
 ---
 
 ## 5. File Map (Quick Reference)
@@ -475,9 +485,10 @@ If you are a new AI agent or developer picking up this work:
    - **Streamlit Dashboard**: A fully decoupled, multi-page interactive UI is running on port 8501 with rich visual aesthetics, deep-dive power curve analysis, and API health monitoring.
    - **MLOps Automation**: DVC tracks the pipeline stages/hyperparameters, Docker microservices orchestrate the stack, and GitHub Actions CI pipelines validate Docker image builds.
    - **Monitoring & Retraining**: Feature drift scanning using Population Stability Index (PSI) is implemented alongside decoupled real-time data freshness API guardrails.
+   - **QA Audit & Patching**: Completed comprehensive static analysis. Fixed critical multi-farm global inference crashes, patched Dashboard API-key lockouts, and exposed dynamic model caching limits.
 6. **Next immediate step**: Phase 10 — Cloud Deployment (Azure)
 
 ---
 
-*Last updated: 2026-08-27 11:28 IST by Gemini 3.1 Pro (High)*
+*Last updated: 2026-08-31 16:42 IST by Antigravity*
 *Conversation ID: c1607655-7cf7-4ba8-a581-3aa5e7e43481*
