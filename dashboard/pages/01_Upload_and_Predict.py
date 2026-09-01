@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import os
 import plotly.graph_objects as go
+import plotly.express as px
 from api_client import WindTurbineAPIClient
+import io
 
 # Load CSS
 css_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "style.css")
@@ -63,9 +65,25 @@ if st.button("Run Batch Prediction", disabled=uploaded_file is None):
             # Plot the scores
             st.markdown("### Anomaly Score Timeline")
             scores = data["per_row_scores"]
+            
+            # Read CSV to get timestamps for x-axis
+            df_plot = pd.read_csv(io.BytesIO(file_bytes))
+            time_cols = [c for c in df_plot.columns if "time" in c.lower()]
+            time_col = time_cols[0] if time_cols else df_plot.columns[0]
+            timestamps = df_plot[time_col]
+            
             fig = go.Figure()
-            fig.add_trace(go.Scatter(y=scores, mode='lines', name='Anomaly Score', line=dict(color='#06b6d4')))
+            fig.add_trace(go.Scatter(x=timestamps, y=scores, mode='lines', name='Anomaly Score', line=dict(color='#06b6d4')))
             fig.add_hline(y=threshold, line_dash="dash", line_color="#ef4444", annotation_text="Threshold")
+            
+            # Highlight anomalies
+            for e in events:
+                fig.add_vrect(
+                    x0=e['start'], x1=e['end'],
+                    fillcolor="red", opacity=0.2,
+                    layer="below", line_width=0,
+                )
+                
             fig.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',

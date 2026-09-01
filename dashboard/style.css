@@ -31,7 +31,7 @@ header {visibility: hidden;}
     background-color: var(--bg-color) !important;
 }
 
-.stMetric, .stDataFrame, .stExpander, div[data-testid="stVerticalBlock"] > div {
+.stMetric, .stDataFrame, .stExpander {
     background: var(--panel-bg);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
