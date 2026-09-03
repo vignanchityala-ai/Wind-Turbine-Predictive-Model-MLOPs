@@ -1,6 +1,6 @@
 FROM python:3.10-slim
-WORKDIR /app
+WORKDIR /app/dashboard
 RUN pip install streamlit requests plotly
-COPY dashboard/ dashboard/
+COPY dashboard/ .
 EXPOSE 8501
-CMD ["streamlit", "run", "dashboard/app.py", "--server.port=8501"]
+CMD ["streamlit", "run", "app.py", "--server.port=8501"]

@@ -232,7 +232,7 @@ def pre_select_sensors(
     # Step 2: Drop near-constant
     variances = sample_df[surviving].var()
     surviving = [c for c in surviving if variances[c] >= min_variance]
-    n_dropped_var = len(present) - n_dropped_nan - len(surviving) + n_dropped_nan
+    n_dropped_var = (len(present) - n_dropped_nan) - len(surviving)
 
     # Step 3: Rank by variance, take top-N
     var_ranked = variances[surviving].sort_values(ascending=False)

@@ -2,8 +2,8 @@ import requests
 import os
 
 class WindTurbineAPIClient:
-    def __init__(self, base_url="http://localhost:8000"):
-        self.base_url = base_url
+    def __init__(self, base_url=None):
+        self.base_url = base_url or os.environ.get("API_URL", "http://localhost:8000")
         self.api_key = os.environ.get("API_KEY", "")
         
     def _get_headers(self):

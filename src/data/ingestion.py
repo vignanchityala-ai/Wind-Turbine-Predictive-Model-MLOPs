@@ -260,10 +260,14 @@ def query_bronze(
     farm_id: str,
     dataset_id: str,
     columns: Optional[list[str]] = None,
-    where: Optional[str] = None,
+    where: Optional[str] = None,  # INTERNAL USE ONLY — not exposed to API users
     limit: Optional[int] = None,
 ) -> "pd.DataFrame":
     """Query a Bronze Parquet file using DuckDB (out-of-core, column-pruned).
+
+    WARNING: `columns` and `where` are interpolated into SQL. This function
+    is for internal pipeline use only. Do NOT pass user-controlled input
+    to these parameters without validation.
 
     This is the primary interface for downstream code to read data from
     the data lake. It never loads the full Parquet file into memory —

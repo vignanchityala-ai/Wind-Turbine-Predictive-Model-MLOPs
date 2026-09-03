@@ -472,6 +472,58 @@ def run_farm_strategy(paths, args, feature_descriptions):
     return farm_result.per_dataset_results, diag_rows
 
 
+def run_global_strategy(args):
+    """Pool sub-datasets from ALL available farms into one global model."""
+    feature_descriptions = None  # Cross-farm: no shared description file
+    all_subs = []
+    for farm_id, farm_conf in config.FARM_CONFIGS.items():
+        raw_dir = Path(farm_conf["raw_dir"])
+        if not raw_dir.exists():
+            log.warning("Farm %s raw data not found at %s — skipping", farm_id, raw_dir)
+            continue
+        paths = data_loader.discover_subdatasets(raw_dir)
+        if args.limit:
+            paths = paths[:args.limit]
+        for p in paths:
+            try:
+                sub = data_loader.load_subdataset(p, event_info_path=args.event_info_path)
+                all_subs.append(sub)
+            except Exception as e:
+                log.error("  FAILED loading %s: %s", p.name, e)
+
+    if not all_subs:
+        log.error("No sub-datasets found across any farm.")
+        return [], []
+
+    log.info("Global strategy: pooling %d sub-datasets across %d farms",
+             len(all_subs), len({s.asset_id for s in all_subs if s.asset_id}))
+
+    # Delegate to farm_pipeline which already handles heterogeneous schemas
+    from . import farm_pipeline
+    farm_result = farm_pipeline.train_farm_model(
+        all_subs, args.model,
+        feature_descriptions=None,  # No shared descriptions across farms
+        do_feature_selection=not args.no_feature_selection,
+    )
+
+    diag_rows = []
+    for r in farm_result.per_dataset_results:
+        diag_rows.append({
+            "dataset": r.name,
+            "n_features": farm_result.diagnostics["n_features"],
+            "n_features_before_selection": farm_result.diagnostics["n_features_before_selection"],
+            "n_dropped_nan": farm_result.diagnostics["n_dropped_nan"],
+            "n_dropped_variance": farm_result.diagnostics["n_dropped_variance"],
+            "n_dropped_correlation": farm_result.diagnostics["n_dropped_correlation"],
+            "n_train_rows": farm_result.diagnostics["n_train_fit_rows"],
+            "n_val_rows": farm_result.diagnostics["n_train_val_rows"],
+            "threshold": farm_result.threshold,
+            "runtime_sec": farm_result.diagnostics["runtime_sec"],
+        })
+
+    return farm_result.per_dataset_results, diag_rows
+
+
 def _fmt(v):
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return "n/a"

@@ -184,10 +184,15 @@ def query_silver(
     farm_id: str,
     dataset_id: str,
     columns: Optional[list[str]] = None,
-    where: Optional[str] = None,
+    where: Optional[str] = None,  # INTERNAL USE ONLY — not exposed to API users
     limit: Optional[int] = None,
 ) -> pd.DataFrame:
-    """Query a Silver Parquet file using DuckDB (same interface as query_bronze)."""
+    """Query a Silver Parquet file using DuckDB (same interface as query_bronze).
+    
+    WARNING: `columns` and `where` are interpolated into SQL. This function
+    is for internal pipeline use only. Do NOT pass user-controlled input
+    to these parameters without validation.
+    """
     import duckdb
 
     parquet_path = config.SILVER_DIR / f"farm={farm_id}" / f"dataset_{dataset_id}.parquet"

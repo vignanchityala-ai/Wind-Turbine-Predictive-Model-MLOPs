@@ -236,11 +236,18 @@ def predict(dataset_name: str, request: PredictRequest,
     )
 
 
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
 @app.post("/batch_predict/{dataset_name}", response_model=BatchPredictResponse)
 async def batch_predict(dataset_name: str, file: UploadFile = File(...), x_api_key: Optional[str] = Header(default=None)):
     _check_auth(x_api_key)
     
     contents = await file.read()
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large ({len(contents) / 1e6:.1f} MB). Max: {MAX_UPLOAD_BYTES / 1e6:.0f} MB."
+        )
     df = pd.read_csv(io.BytesIO(contents))
     
     if config.TIME_COL not in df.columns:
@@ -319,7 +326,8 @@ async def batch_predict(dataset_name: str, file: UploadFile = File(...), x_api_k
 @app.post("/predict/farm/{farm_name}", response_model=PredictResponse)
 def predict_farm(farm_name: str, request: PredictRequest, x_api_key: Optional[str] = Header(default=None)):
     # Reuses predict endpoint logic but explicitly targets the farm model
-    return predict(farm_name, request, x_api_key)
+    model_name = f"Wind_Farm_{farm_name}"
+    return predict(model_name, request, x_api_key)
 
 @app.get("/model/info/{model_name}")
 def get_model_info(model_name: str, x_api_key: Optional[str] = Header(default=None)):

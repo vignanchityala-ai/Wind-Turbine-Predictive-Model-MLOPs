@@ -5,6 +5,8 @@ services:
       dockerfile: docker/Dockerfile.api
     ports: 
       - "8000:8000"
+    environment:
+      - API_KEY=${API_KEY}
     volumes:
       - ./models:/app/models
   
@@ -18,6 +20,7 @@ services:
       - api
     environment:
       - API_URL=http://api:8000
+      - API_KEY=${API_KEY}
   
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest

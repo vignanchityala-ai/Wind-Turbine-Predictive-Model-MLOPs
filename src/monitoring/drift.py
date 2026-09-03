@@ -6,9 +6,14 @@ def compute_psi(reference: np.ndarray, current: np.ndarray, bins: int = 10) -> f
     Computes Population Stability Index (PSI) between two distributions.
     PSI > 0.2 typically indicates significant drift.
     """
-    # Create unified bin edges spanning both distributions
+    if len(reference) == 0 or len(current) == 0:
+        return 0.0
     min_val = min(np.min(reference), np.min(current))
     max_val = max(np.max(reference), np.max(current))
+    if min_val == max_val:
+        return 0.0  # Identical constant distributions
+        
+    # Create unified bin edges spanning both distributions
     bin_edges = np.linspace(min_val, max_val, bins + 1)
     
     # Calculate histograms

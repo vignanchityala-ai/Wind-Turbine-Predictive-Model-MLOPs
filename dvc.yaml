@@ -21,9 +21,13 @@ stages:
       - data/gold/farm=A
   
   train:
-    cmd: python -m src.run_pipeline --training-strategy farm
+    # NOTE: run_pipeline.py currently reads from data/raw/ via data_loader.py,
+    # not from Gold Parquet. This dep chain is semantically correct for tracking
+    # "did the raw data change?" but the intermediate Bronze/Silver/Gold stages
+    # are not consumed by training yet. Wiring training to Gold is a future refactor.
+    cmd: python -m src.run_pipeline --training-strategy farm --save-models
     deps: 
-      - data/gold/farm=A
+      - data/raw/Wind Farm A
       - src/model.py
       - src/features.py
       - src/run_pipeline.py

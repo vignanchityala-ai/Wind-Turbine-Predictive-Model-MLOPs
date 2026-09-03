@@ -1,6 +1,7 @@
 """Wraps training runs in MLflow context."""
 import mlflow
 import os
+import math
 
 class ExperimentTracker:
     def __init__(self, experiment_name, tracking_uri=None):
@@ -13,9 +14,16 @@ class ExperimentTracker:
     def log_training_run(self, params, metrics, artifacts=None, model_name=None):
         with mlflow.start_run():
             if params:
-                mlflow.log_params(params)
+                # MLflow params must be strings; filter None
+                safe_params = {k: str(v) for k, v in params.items() if v is not None}
+                mlflow.log_params(safe_params)
             if metrics:
-                mlflow.log_metrics(metrics)  # coverage, reliability, earliness, composite
+                safe_metrics = {
+                    k: float(v) for k, v in metrics.items()
+                    if v is not None and isinstance(v, (int, float)) and math.isfinite(v)
+                }
+                if safe_metrics:
+                    mlflow.log_metrics(safe_metrics)
             if artifacts:
                 for name, path in artifacts.items():
                     mlflow.log_artifact(path)
